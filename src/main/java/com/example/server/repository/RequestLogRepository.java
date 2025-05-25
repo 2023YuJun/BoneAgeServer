@@ -17,16 +17,21 @@ public class RequestLogRepository {
     private void initializeDatabase() {
         jdbcTemplate.execute("""
             CREATE TABLE IF NOT EXISTS request_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                method TEXT NOT NULL,
-                path TEXT NOT NULL,
-                client_ip TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                RequestLogID INTEGER PRIMARY KEY AUTOINCREMENT,
+                Method TEXT NOT NULL,
+                Path TEXT NOT NULL,
+                ClientIP TEXT NOT NULL,
+                Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )""");
     }
 
     public void save(RequestLog log) {
-        String sql = "INSERT INTO request_log (method, path, client_ip) VALUES (?, ?, ?)";
-        jdbcTemplate.update(sql, log.getMethod(), log.getPath(), log.getClientIp());
+        String sql = "INSERT INTO request_log (Method, Path, ClientIP) VALUES (?, ?, ?)";
+        jdbcTemplate.update(sql, log.getMethod(), log.getPath(), log.getClientIP());
+    }
+
+    public void deleteOldLogs() {
+        String sql = "DELETE FROM request_log WHERE Timestamp < datetime('now', '-180 day')";
+        jdbcTemplate.update(sql);
     }
 }

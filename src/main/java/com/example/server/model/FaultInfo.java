@@ -5,8 +5,8 @@ import java.time.LocalDateTime;
 
 @Data
 public class FaultInfo {
-    private Long id;
-    private String content;
-    private String deviceIP;
-    private LocalDateTime createTime;
+    private Long FaultID;
+    private String Content;
+    private String DeviceIP;
+    private LocalDateTime CreateTime;
 }
