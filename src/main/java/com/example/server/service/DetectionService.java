@@ -2,8 +2,13 @@ package com.example.server.service;
 
 import ai.onnxruntime.*;
 import ai.onnxruntime.OrtEnvironment;
+import com.example.server.model.DetectionInfo;
+import com.example.server.repository.DetectionInfoRepository;
 import org.apache.commons.imaging.Imaging;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 
+import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -11,10 +16,13 @@ import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.util.*;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+@Service
 public class DetectionService {
     // 模型配置常量
+    private BufferedImage currentOriginImage;
     private static final int INPUT_SIZE = 640;
     private static final float CONF_THRESHOLD = 0.5f;
     private static final String[] CLASS_NAMES = {
@@ -22,12 +30,44 @@ public class DetectionService {
             "ProximalPhalanx", "Radius", "Ulna"
     };
     private static final int NUM_CLASSES = CLASS_NAMES.length;
+    // 重命名规则配置
+    private static final Map<String, Map<Boolean, Map<Integer, String>>> RENAME_RULES = new HashMap<>();
+    static {
+        // DistalPhalanx
+        Map<Boolean, Map<Integer, String>> distalRules = new HashMap<>();
+        distalRules.put(true, Map.of(0, "DIPFifth", 2, "DIPThird", 4, "DIPFirst"));
+        distalRules.put(false, Map.of(0, "DIPFirst",2, "DIPThird", 4, "DIPFifth"));
+        RENAME_RULES.put("DistalPhalanx", distalRules);
+
+        // MCP
+        Map<Boolean, Map<Integer, String>> mcpRules = new HashMap<>();
+        mcpRules.put(true, Map.of(0, "MCPFifth", 2, "MCPThird"));
+        mcpRules.put(false, Map.of(1, "MCPThird", 3, "MCPFifth"));
+        RENAME_RULES.put("MCP", mcpRules);
+
+        // MiddlePhalanx
+        Map<Boolean, Map<Integer, String>> middleRules = new HashMap<>();
+        middleRules.put(true, Map.of(0, "MIPFifth", 2, "MIPThird"));
+        middleRules.put(false, Map.of(1, "MIPThird", 3, "MIPFifth"));
+        RENAME_RULES.put("MiddlePhalanx", middleRules);
+
+        // ProximalPhalanx
+        Map<Boolean, Map<Integer, String>> proximalRules = new HashMap<>();
+        proximalRules.put(true, Map.of(0, "PIPFifth", 2, "PIPThird", 4, "PIPFirst"));
+        proximalRules.put(false, Map.of(0, "PIPFirst", 2, "PIPThird", 4, "PIPFifth"));
+        RENAME_RULES.put("ProximalPhalanx", proximalRules);
+    }
 
     // ONNX运行时组件
     private final OrtEnvironment env;
     private final OrtSession session;
 
-    public DetectionService() throws Exception {
+    // 数据库表
+    private final DetectionInfoRepository detectionRepo;
+
+    @Autowired
+    public DetectionService(DetectionInfoRepository detectionRepo) throws Exception {
+        this.detectionRepo = detectionRepo;
         env = OrtEnvironment.getEnvironment();
         try (InputStream modelStream = getClass().getResourceAsStream("/model/detection.onnx")) {
             OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
@@ -40,12 +80,10 @@ public class DetectionService {
 
     public Map<String, Object> detect(String imagePath) throws Exception {
         // 读取原始图像
-        BufferedImage originImage = Imaging.getBufferedImage(new File(imagePath));
-        int originWidth = originImage.getWidth();
-        int originHeight = originImage.getHeight();
+        currentOriginImage = Imaging.getBufferedImage(new File(imagePath));
 
         // 预处理图像
-        ProcessedImage processed = processImage(originImage);
+        ProcessedImage processed = processImage(currentOriginImage);
 
         // 准备模型输入
         float[][][][] inputData = prepareInput(processed.paddedImage);
@@ -69,7 +107,7 @@ public class DetectionService {
             }
 
             // 打包最终结果
-            return packageResults(detections, originImage);
+            return packageResults(detections);
         }
     }
 
@@ -126,7 +164,6 @@ public class DetectionService {
         List<DetectionResult> results = new ArrayList<>();
         int numFeatures = output[0].length; // 11
         int numPredictions = output[0][0].length; // 8400
-        System.out.println("Total predictions: " + numPredictions);
         for (int i = 0; i < numPredictions; i++) {
             // 提取每个预测的11个参数
             float[] pred = new float[numFeatures];
@@ -149,10 +186,6 @@ public class DetectionService {
             // 跳过低置信度的检测框
             if (maxConfidence < CONF_THRESHOLD) continue;
 
-            System.out.println("Class probabilities: " + Arrays.toString(classProbs));
-            System.out.println("Selected class ID: " + CLASS_NAMES[classId]);
-
-
             // 转换为原始图像坐标
             float x1 = (xCenter - width / 2 - processed.xOffset) / processed.scale;
             float y1 = (yCenter - height / 2 - processed.yOffset) / processed.scale;
@@ -167,7 +200,6 @@ public class DetectionService {
 
             // 跳过无效区域
             if (x2 <= x1 || y2 <= y1) {
-                System.out.println("Invalid bbox: " + x1 + "," + y1 + " " + x2 + "," + y2);
                 continue;
             }
 
@@ -252,34 +284,129 @@ public class DetectionService {
         return flat;
     }
 
+    // 工具方法：判断左右手
+    private boolean isLeftHand(List<DetectionResult> detections) {
+        DetectionResult ulna = detections.stream()
+                .filter(d -> d.className.equals("Ulna"))
+                .findFirst()
+                .orElseThrow();
+
+        DetectionResult radius = detections.stream()
+                .filter(d -> d.className.equals("Radius"))
+                .findFirst()
+                .orElseThrow();
+
+        return ulna.center[0] < radius.center[0];
+    }
+
     // 打包最终结果
-    private Map<String, Object> packageResults(List<DetectionResult> detections, BufferedImage originImage) {
+    private Map<String, Object> packageResults(List<DetectionResult> detections) {
+        boolean isLeftHand = isLeftHand(detections);
         Map<String, List<Map<String, Object>>> resultMap = new LinkedHashMap<>();
 
-        for (DetectionResult det : detections) {
-            // 裁剪检测区域
-            int x1 = (int) det.bbox[0];
-            int y1 = (int) det.bbox[1];
-            int width = (int) (det.bbox[2] - x1);
-            int height = (int) (det.bbox[3] - y1);
+        // 处理保持原样的类型
+        Arrays.asList("MCPFirst", "Radius", "Ulna").forEach(type -> {
+            resultMap.put(type, detections.stream()
+                    .filter(d -> d.className.equals(type))
+                    .map(this::convertToMap)
+                    .collect(Collectors.toList()));
+        });
 
-            // 边界二次验证
-            if (x1 < 0 || y1 < 0 || width <= 0 || height <= 0) continue;
-            if (x1 + width > originImage.getWidth()) width = originImage.getWidth() - x1;
-            if (y1 + height > originImage.getHeight()) height = originImage.getHeight() - y1;
+        // 处理需要转换的类型
+        processBoneType(resultMap, detections, "DistalPhalanx", isLeftHand);
+        processBoneType(resultMap, detections, "MCP", isLeftHand);
+        processBoneType(resultMap, detections, "MiddlePhalanx", isLeftHand);
+        processBoneType(resultMap, detections, "ProximalPhalanx", isLeftHand);
 
-            BufferedImage crop = originImage.getSubimage(x1, y1, width, height);
-
-            // 构建结果项
-            Map<String, Object> item = new HashMap<>();
-            item.put("center", det.center);
-            item.put("bbox", det.bbox);
-            item.put("crop", crop);
-
-            resultMap.computeIfAbsent(det.className, k -> new ArrayList<>()).add(item);
-        }
+        saveDetectionData(detections);
 
         return Collections.singletonMap("results", resultMap);
+    }
+
+    private void processBoneType(Map<String, List<Map<String, Object>>> resultMap,
+                                 List<DetectionResult> detections,
+                                 String boneType,
+                                 boolean isLeftHand) {
+        // 1. 获取原始检测结果并过滤
+        List<DetectionResult> originItems = detections.stream()
+                .filter(d -> d.className.equals(boneType))
+                .collect(Collectors.toList());
+
+        // 2. 按中心点 X 坐标升序排序（从左到右）
+        originItems.sort(Comparator.comparingDouble(d -> d.center[0]));
+
+        // 3. 获取当前骨骼类型和手性对应的重命名规则
+        Map<Integer, String> renameMap = RENAME_RULES.get(boneType).get(isLeftHand);
+
+        // 4. 遍历排序后的结果，仅处理规则中定义的索引
+        for (int index = 0; index < originItems.size(); index++) {
+            if (renameMap.containsKey(index)) {
+                DetectionResult origin = originItems.get(index);
+                String newClassName = renameMap.get(index);
+                DetectionResult renamed = new DetectionResult(
+                        newClassName,
+                        origin.center,
+                        origin.bbox,
+                        origin.confidence
+                );
+                resultMap.computeIfAbsent(newClassName, k -> new ArrayList<>())
+                        .add(convertToMap(renamed));
+            }
+        }
+    }
+
+    private Map<String, Object> convertToMap(DetectionResult result) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("center", result.center);
+        map.put("bbox", result.bbox);
+        map.put("crop", getSubImage(result));
+        return map;
+    }
+
+    private BufferedImage getSubImage(DetectionResult det) {
+        int x1 = (int) det.bbox[0];
+        int y1 = (int) det.bbox[1];
+        int width = (int) (det.bbox[2] - x1);
+        int height = (int) (det.bbox[3] - y1);
+
+        // 边界检查
+        x1 = Math.max(0, x1);
+        y1 = Math.max(0, y1);
+        width = Math.min(width, currentOriginImage.getWidth() - x1);
+        height = Math.min(height, currentOriginImage.getHeight() - y1);
+
+        return currentOriginImage.getSubimage(x1, y1, width, height);
+    }
+
+    private void saveDetectionData(List<DetectionResult> detections) {
+        DetectionInfo info = new DetectionInfo();
+
+        // 遍历检测结果填充数据
+        detections.forEach(d -> {
+            String coord = String.format("[%.2f,%.2f]", d.center[0], d.center[1]);
+            switch(d.className) {
+                case "MCPFirst":   info.setMCPFirst(coord); break;
+                case "MCPThird":   info.setMCPThird(coord); break;
+                case "MCPFifth":   info.setMCPFifth(coord); break;
+                case "PIPFirst":   info.setPIPFirst(coord); break;
+                case "PIPThird":   info.setPIPThird(coord); break;
+                case "PIPFifth":   info.setPIPFifth(coord); break;
+                case "MIPThird":   info.setMIPThird(coord); break;
+                case "MIPFifth":   info.setMIPFifth(coord); break;
+                case "DIPFirst":   info.setDIPFirst(coord); break;
+                case "DIPThird":   info.setDIPThird(coord); break;
+                case "DIPFifth":   info.setDIPFifth(coord); break;
+                case "Radius":    info.setRadius(coord); break;
+                case "Ulna":      info.setUlna(coord); break;
+            }
+        });
+
+        try {
+            detectionRepo.save(info);
+        } catch (Exception e) {
+            System.err.println("数据库保存失败: " + e.getMessage());
+            // 可添加重试逻辑或异常处理
+        }
     }
 
     // 辅助类：预处理后的图像信息
@@ -302,8 +429,6 @@ public class DetectionService {
             this.scale = scale;
             this.originWidth = originWidth;
             this.originHeight = originHeight;
-            System.out.printf("Scale: %.2f, OffsetX: %d, OffsetY: %d%n",
-                    scale, xOffset, yOffset);
         }
     }
 
@@ -323,41 +448,111 @@ public class DetectionService {
     }
 
     // 测试方法
-    public static void main(String[] args) {
-        try {
-            DetectionService detector = new DetectionService();
+//    public static void main(String[] args) {
+//        try {
+//            DetectionService detector = new DetectionService();
+//
+//            // 获取测试图像路径
+//            String imagePath = Objects.requireNonNull(
+//                    DetectionService.class.getClassLoader().getResource("static/test_handX_R.png")
+//            ).getFile();
+//
+//            Map<String, Object> results = detector.detect(imagePath);
+//
+//            if (results.containsKey("error")) {
+//                System.err.println("检测错误: " + results.get("error"));
+//                return;
+//            }
+//
+//            // 打印结果
+//            @SuppressWarnings("unchecked")
+//            Map<String, List<Map<String, Object>>> detections =
+//                    (Map<String, List<Map<String, Object>>>) results.get("results");
+//            System.out.println("=== 最终检测结果 ===");
+//            detections.forEach((className, items) -> {
+//                System.out.printf("%s (%d 个):\n", className, items.size());
+//                items.forEach(item -> {
+//                    float[] center = (float[]) item.get("center");
+//                    System.out.printf("\t中心点: (%.1f, %.1f)\n", center[0], center[1]);
+//                    float[] bbox = (float[]) item.get("bbox");
+//                    System.out.printf("\t边界框: [%.1f, %.1f, %.1f, %.1f]\n",
+//                            bbox[0], bbox[1], bbox[2], bbox[3]);
+//                });
+//            });
+//
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+//    }
 
-            // 获取测试图像路径
-            String imagePath = Objects.requireNonNull(
-                    DetectionService.class.getClassLoader().getResource("static/test_handX_R.png")
-            ).getFile();
-
-            Map<String, Object> results = detector.detect(imagePath);
-
-            if (results.containsKey("error")) {
-                System.err.println("检测错误: " + results.get("error"));
-                return;
-            }
-
-            // 打印结果
-            @SuppressWarnings("unchecked")
-            Map<String, List<Map<String, Object>>> detections =
-                    (Map<String, List<Map<String, Object>>>) results.get("results");
-
-            System.out.println("=== 检测结果 ===");
-            detections.forEach((className, items) -> {
-                System.out.printf("%s (%d 个):\n", className, items.size());
-                items.forEach(item -> {
-                    float[] center = (float[]) item.get("center");
-                    float[] bbox = (float[]) item.get("bbox");
-                    System.out.printf("\t中心点: (%.1f, %.1f)\n", center[0], center[1]);
-                    System.out.printf("\t区域: %.1f×%.1f\n",
-                            bbox[2] - bbox[0], bbox[3] - bbox[1]);
-                });
-            });
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+//    public static void main(String[] args) {
+//        try {
+//            DetectionService detector = new DetectionService();
+//            String imagePath = Objects.requireNonNull(
+//                    DetectionService.class.getClassLoader().getResource("static/test_handX_L.png")
+//            ).getFile();
+//
+//            // 执行检测
+//            Map<String, Object> results = detector.detect(imagePath);
+//            if (results.containsKey("error")) {
+//                System.err.println("检测错误: " + results.get("error"));
+//                return;
+//            }
+//
+//            // 获取原始图像副本用于绘制
+//            BufferedImage outputImage = new BufferedImage(
+//                    detector.currentOriginImage.getWidth(),
+//                    detector.currentOriginImage.getHeight(),
+//                    BufferedImage.TYPE_INT_RGB
+//            );
+//            Graphics2D g = outputImage.createGraphics();
+//            g.drawImage(detector.currentOriginImage, 0, 0, null);
+//
+//            // 设置绘制参数
+//            g.setFont(new Font("Arial", Font.BOLD, 14));
+//            g.setStroke(new BasicStroke(2));
+//            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+//
+//            // 遍历检测结果并绘制
+//            @SuppressWarnings("unchecked")
+//            Map<String, List<Map<String, Object>>> detections =
+//                    (Map<String, List<Map<String, Object>>>) results.get("results");
+//
+//            detections.forEach((className, items) -> {
+//                items.forEach(item -> {
+//                    float[] bbox = (float[]) item.get("bbox");
+//                    float[] center = (float[]) item.get("center");
+//
+//                    // 绘制检测框（红色）
+//                    g.setColor(Color.RED);
+//                    g.drawRect((int)bbox[0], (int)bbox[1],
+//                            (int)(bbox[2]-bbox[0]), (int)(bbox[3]-bbox[1]));
+//
+//                    // 绘制中心点（蓝色）
+//                    g.setColor(Color.BLUE);
+//                    g.fillOval((int)center[0]-4, (int)center[1]-4, 8, 8);
+//
+//                    // 绘制坐标文本（黑色）
+//                    g.setColor(Color.BLACK);
+//                    String coordText = String.format("[%.0f,%.0f,%.0f,%.0f]",
+//                            bbox[0], bbox[1], bbox[2], bbox[3]);
+//                    g.drawString(coordText, (int)bbox[0], (int)bbox[1]-5);
+//
+//                    // 绘制类别名称（绿色）
+//                    g.setColor(new Color(0, 150, 0));
+//                    g.drawString(className, (int)center[0]+10, (int)center[1]+5);
+//                });
+//            });
+//
+//            g.dispose();
+//
+//            // 保存结果图像
+//            File outputFile = new File("detection_result.jpg");
+//            ImageIO.write(outputImage, "jpg", outputFile);
+//            System.out.println("检测结果已保存至: " + outputFile.getAbsolutePath());
+//
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+//    }
 }
