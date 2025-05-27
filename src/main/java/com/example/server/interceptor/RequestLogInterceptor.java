@@ -4,15 +4,18 @@ import com.example.server.model.RequestLog;
 import com.example.server.repository.RequestLogRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 @Component
 public class RequestLogInterceptor implements HandlerInterceptor {
     private final RequestLogRepository logRepository;
+    private final JdbcTemplate jdbcTemplate;
 
-    public RequestLogInterceptor(RequestLogRepository logRepository) {
+    public RequestLogInterceptor(RequestLogRepository logRepository, JdbcTemplate jdbcTemplate) {
         this.logRepository = logRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
@@ -20,7 +23,7 @@ public class RequestLogInterceptor implements HandlerInterceptor {
         RequestLog log = new RequestLog();
         log.setMethod(request.getMethod());
         log.setPath(request.getRequestURI());
-        log.setClientIp(request.getRemoteAddr());
+        log.setClientIP(request.getRemoteAddr());
         logRepository.save(log);
         return true;
     }

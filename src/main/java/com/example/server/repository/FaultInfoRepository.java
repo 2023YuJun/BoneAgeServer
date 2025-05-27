@@ -21,15 +21,15 @@ public class FaultInfoRepository {
     private void initializeDatabase() {
         jdbcTemplate.execute("""
             CREATE TABLE IF NOT EXISTS fault_info (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT NOT NULL,
-                deviceIP TEXT NOT NULL,
-                create_time DATETIME DEFAULT CURRENT_TIMESTAMP
+                FaultID INTEGER PRIMARY KEY AUTOINCREMENT,
+                Content TEXT NOT NULL,
+                DeviceIP TEXT NOT NULL,
+                Create_time DATETIME DEFAULT CURRENT_TIMESTAMP
             )""");
     }
 
     public void save(FaultInfo faultInfo) {
-        String sql = "INSERT INTO fault_info (content, deviceIP) VALUES (?, ?)";
+        String sql = "INSERT INTO fault_info (Content, DeviceIP) VALUES (?, ?)";
         jdbcTemplate.update(sql, faultInfo.getContent(), faultInfo.getDeviceIP());
     }
 }
