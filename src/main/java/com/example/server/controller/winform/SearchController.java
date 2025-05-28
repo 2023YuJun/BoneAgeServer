@@ -2,6 +2,8 @@ package com.example.server.controller.winform;
 
 import com.example.server.Utils.RCScoreUtils;
 import com.example.server.Utils.TRScoreUtils;
+import com.example.server.model.PatientInfo;
+import com.example.server.repository.PatientInfoRepository;
 import com.example.server.service.DICOMService;
 import com.example.server.service.DetectionService;
 import com.example.server.service.ClassifyService;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -32,11 +35,18 @@ public class SearchController {
     private final DICOMService dicomService;
     private final DetectionService detectionService;
     private final ClassifyService classifyService;
+    private final PatientInfoRepository patientInfoRepository;
 
-    public SearchController(DICOMService dicomService, DetectionService detectionService, ClassifyService classifyService) {
+    public SearchController(
+            DICOMService dicomService,
+            DetectionService detectionService,
+            ClassifyService classifyService,
+            PatientInfoRepository patientInfoRepository
+    ) {
         this.dicomService = dicomService;
         this.detectionService = detectionService;
         this.classifyService = classifyService;
+        this.patientInfoRepository = patientInfoRepository;
     }
 
     /**
@@ -53,17 +63,22 @@ public class SearchController {
                 return completedErrorResponse(HttpStatus.NOT_FOUND, "未找到患者ID: " + patientID);
             }
 
+            // 获取患者元数据
+            Attributes patientAttr = patients.getFirst();
+            String birthDateStr = patientAttr.getString(Tag.PatientBirthDate, "");
+            String sex = patientAttr.getString(Tag.PatientSex, "U");
+
             List<Attributes> studies = dicomService.studySearch(patientID);
             if (studies.isEmpty()) {
                 return completedErrorResponse(HttpStatus.NOT_FOUND, "未找到Study信息");
             }
 
-            List<String> pngPaths = processAllStudies(patientID, studies);
+            List<String> pngPaths = processAllStudies(patientID, birthDateStr, sex, studies);
             if (pngPaths.isEmpty()) {
                 return completedErrorResponse(HttpStatus.NOT_FOUND, "未找到符合条件的Hand系列图像");
             }
 
-            boolean isMale = patients.getFirst().getString(Tag.PatientSex).equalsIgnoreCase("M");
+            boolean isMale = sex.equalsIgnoreCase("M");
 
             return processPngPaths(pngPaths, isMale);
 
@@ -75,13 +90,28 @@ public class SearchController {
     /**
      * 处理所有Study层级的图像
      */
-    private List<String> processAllStudies(String patientID, List<Attributes> studies) {
+    private List<String> processAllStudies(
+            String patientID,
+            String birthDateStr,
+            String sex,
+            List<Attributes> studies
+    ) {
         List<String> pngPaths = new ArrayList<>();
+        LocalDate birthDate = parseDicomDate(birthDateStr);
+
+        // 获取数据库中该患者最新的Study日期
+        LocalDate latestStudyDateInDB = patientInfoRepository.findLatestStudyDateByPatient(patientID);
 
         for (Attributes study : studies) {
-            String studyUID = study.getString(Tag.StudyInstanceUID);
-            String studyDate = study.getString(Tag.StudyDate, "");
+            String studyDateStr = study.getString(Tag.StudyDate, "");
+            LocalDate studyDate = parseDicomDate(studyDateStr);
 
+            if (latestStudyDateInDB != null &&
+                    !studyDate.isAfter(latestStudyDateInDB)) {
+                continue;
+            }
+
+            String studyUID = study.getString(Tag.StudyInstanceUID);
             List<Attributes> seriesList = dicomService.seriesSearch(studyUID);
             List<Attributes> handSeries = filterHandSeries(seriesList);
 
@@ -92,11 +122,19 @@ public class SearchController {
                 for (Attributes image : images) {
                     String sopUID = image.getString(Tag.SOPInstanceUID);
                     String downloadUrl = dicomService.buildDownloadUrl(
-                            studyUID, seriesUID, sopUID, studyDate, patientID
+                            studyUID, seriesUID, sopUID, studyDateStr, patientID
                     );
+
+                    // 下载并转换DICOM文件
                     String pngPath = dicomService.downloadAndConvertToPng(downloadUrl, sopUID);
-                    if (pngPath != null && new File(pngPath).exists()) {
+                    if (pngPath != null) {
                         pngPaths.add(pngPath);
+
+                        // 保存患者信息到数据库
+                        savePatientInfo(
+                                patientID, birthDate, sex,
+                                studyUID, seriesUID, sopUID, studyDate
+                        );
                     }
                 }
             }
@@ -151,6 +189,59 @@ public class SearchController {
         return CompletableFuture.completedFuture(
                 ResponseEntity.ok(Map.of(MESSAGE_KEY, "推理成功"))
         );
+    }
+
+    /**
+     * 解析DICOM日期格式（如 "20230815" -> LocalDate）
+     */
+    private LocalDate parseDicomDate(String dicomDate) {
+        if (dicomDate == null || dicomDate.length() < 8) {
+            System.err.println("无效的DICOM日期格式: " + dicomDate);
+            return null;
+        }
+        try {
+            return LocalDate.parse(
+                    dicomDate.substring(0, 4) + "-" +
+                            dicomDate.substring(4, 6) + "-" +
+                            dicomDate.substring(6, 8)
+            );
+        } catch (Exception e) {
+            System.err.println("日期解析失败: " + dicomDate);
+            return null;
+        }
+    }
+
+    /**
+     * 保存患者信息到数据库
+     */
+    private void savePatientInfo(
+            String patientID,
+            LocalDate birthDate,
+            String sex,
+            String studyUID,
+            String seriesUID,
+            String sopUID,
+            LocalDate studyDate
+    ) {
+        if (studyDate == null) {
+            System.err.println("跳过无效Study日期的记录");
+            return;
+        }
+        PatientInfo patientInfo = new PatientInfo();
+        patientInfo.setPatientID(patientID);
+        patientInfo.setBrithDate(birthDate);
+        patientInfo.setSex(sex);
+        patientInfo.setStudyInstanceUID(studyUID);
+        patientInfo.setSeriesInstanceUID(seriesUID);
+        patientInfo.setSOPInstanceUID(sopUID);
+        patientInfo.setStudyDate(studyDate);
+        patientInfo.setInferenceID(null);
+
+        try {
+            patientInfoRepository.save(patientInfo);
+        } catch (Exception e) {
+            System.err.println("保存患者信息失败: " + e.getMessage());
+        }
     }
 
     /**

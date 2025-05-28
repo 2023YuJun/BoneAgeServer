@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import javax.sql.DataSource;
+import java.time.LocalDate;
 
 @Repository
 public class PatientInfoRepository {
@@ -47,5 +48,10 @@ public class PatientInfoRepository {
                 patientInfo.getInferenceID(),
                 patientInfo.getStudyDate()
         );
+    }
+
+    public LocalDate findLatestStudyDateByPatient(String patientID) {
+        String sql = "SELECT MAX(StudyDate) FROM patient_info WHERE PatientID = ?";
+        return jdbcTemplate.queryForObject(sql, LocalDate.class, patientID);
     }
 }
