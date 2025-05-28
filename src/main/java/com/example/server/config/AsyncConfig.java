@@ -7,6 +7,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 @Configuration
 @EnableAsync
@@ -25,7 +26,7 @@ public class AsyncConfig implements AsyncConfigurer {
 
     // DICOM操作线程池
     @Bean(name = "dicomTaskExecutor")
-    public Executor dicomTaskExecutor() {
-        return Executors.newFixedThreadPool(10);
+    public ScheduledExecutorService dicomTaskExecutor() {
+        return Executors.newScheduledThreadPool(10);
     }
 }

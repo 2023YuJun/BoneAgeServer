@@ -144,7 +144,7 @@ public class DICOMService {
                 synchronized (lock) {
                     while (!completed.get()) {
                         try {
-                            lock.wait(30000); // 最多等待30秒
+                            lock.wait(60000); // 最多等待60秒
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
@@ -177,19 +177,31 @@ public class DICOMService {
     }
 
     public String downloadAndConvertToPng(String downloadUrl, String sopUID) {
+        Path dicomPath = null;
         try {
+            // 下载DICOM文件
             String dicomFileName = sopUID + ".dcm";
-            Path dicomPath = Paths.get(DICOM_DIR, dicomFileName);
+            dicomPath = Paths.get(DICOM_DIR, dicomFileName);
             downloadFile(downloadUrl, dicomPath.toString());
 
+            // 转换为PNG
             String pngFileName = sopUID + ".png";
             Path pngPath = Paths.get(PNG_DIR, pngFileName);
             convertDicomToPng(dicomPath.toString(), pngPath.toString());
 
+            // 删除临时DICOM文件
             Files.deleteIfExists(dicomPath);
             return pngPath.toString();
         } catch (IOException e) {
-            throw new RuntimeException("文件处理失败", e);
+            // 记录错误日志
+            System.err.println("文件处理失败 [SOP_UID=" + sopUID + "]: " + e.getMessage());
+            // 清理残留文件
+            try {
+                if (dicomPath != null) Files.deleteIfExists(dicomPath);
+            } catch (IOException ex) {
+                System.err.println("清理临时文件失败: " + ex.getMessage());
+            }
+            return null;
         }
     }
 
@@ -285,7 +297,7 @@ public class DICOMService {
                 "http://%s:%d/WADO/ROX1?requesttype=WADO&studyUID=%s&seriesUID=%s" +
                         "&objectUID=%s&modality=PX&StudyDate=%s&PatientID=%s&contentType=application/dicom",
                 config.getPacsIp(),
-                config.getPacsPort(),
+                config.getDownloadPort(),
                 studyUID,
                 seriesUID,
                 sopUID,
