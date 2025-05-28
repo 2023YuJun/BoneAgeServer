@@ -1,6 +1,11 @@
 package com.example.server.controller.winform;
 
+import com.example.server.Utils.RCScoreUtils;
+import com.example.server.Utils.TRScoreUtils;
 import com.example.server.service.DICOMService;
+import com.example.server.service.DetectionService;
+import com.example.server.service.ClassifyService;
+import org.apache.commons.imaging.Imaging;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
 import org.springframework.http.HttpStatus;
@@ -11,10 +16,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -26,9 +30,13 @@ public class SearchController {
     private static final String MESSAGE_KEY = "message";
 
     private final DICOMService dicomService;
+    private final DetectionService detectionService;
+    private final ClassifyService classifyService;
 
-    public SearchController(DICOMService dicomService) {
+    public SearchController(DICOMService dicomService, DetectionService detectionService, ClassifyService classifyService) {
         this.dicomService = dicomService;
+        this.detectionService = detectionService;
+        this.classifyService = classifyService;
     }
 
     /**
@@ -55,11 +63,10 @@ public class SearchController {
                 return completedErrorResponse(HttpStatus.NOT_FOUND, "未找到符合条件的Hand系列图像");
             }
 
+            boolean isMale = patients.getFirst().getString(Tag.PatientSex).equalsIgnoreCase("M");
 
+            return processPngPaths(pngPaths, isMale);
 
-            return CompletableFuture.completedFuture(
-                    ResponseEntity.ok(Map.of(MESSAGE_KEY, "推理成功"))
-            );
         } catch (Exception e) {
             return CompletableFuture.completedFuture(handleException(e));
         }
@@ -87,7 +94,10 @@ public class SearchController {
                     String downloadUrl = dicomService.buildDownloadUrl(
                             studyUID, seriesUID, sopUID, studyDate, patientID
                     );
-                    pngPaths.add(dicomService.downloadAndConvertToPng(downloadUrl, sopUID));
+                    String pngPath = dicomService.downloadAndConvertToPng(downloadUrl, sopUID);
+                    if (pngPath != null && new File(pngPath).exists()) {
+                        pngPaths.add(pngPath);
+                    }
                 }
             }
         }
@@ -102,6 +112,45 @@ public class SearchController {
                 .filter(series -> HAND_SERIES_DESCRIPTION.equalsIgnoreCase(
                         series.getString(Tag.SeriesDescription, "")))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 图像处理流程
+     */
+    private CompletableFuture<ResponseEntity<?>> processPngPaths(List<String> pngPaths, boolean isMale) throws Exception {
+        for (String pngPath : pngPaths) {
+            BufferedImage originImage = Imaging.getBufferedImage(new File(pngPath));
+            // 1. 调用检测服务
+            Map<String, Object> detectionResult = detectionService.detect(originImage);
+            if (detectionResult.containsKey(ERROR_KEY)) {
+                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "检测失败: " + detectionResult.get(ERROR_KEY));
+            }
+
+            // 2. 调用分类服务
+            Map<String, Integer> classifyResult;
+            try {
+                classifyResult = classifyService.classify(detectionResult, originImage);
+            } catch (Exception e) {
+                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "分类失败: " + e.getMessage());
+            }
+
+            // 3. 调用两个骨龄计算工具
+            try {
+                RCScoreUtils.calculateBoneAge(isMale, classifyResult);
+                TRScoreUtils.calculateBoneAge(isMale, classifyResult);
+            } catch (IllegalArgumentException e) {
+                return completedErrorResponse(HttpStatus.BAD_REQUEST, e.getMessage());
+            } catch (Exception e) {
+                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "骨龄计算失败: " + e.getMessage());
+            }
+        }
+
+        return CompletableFuture.completedFuture(
+                ResponseEntity.ok(Map.of(MESSAGE_KEY, "推理成功"))
+        );
     }
 
     /**
