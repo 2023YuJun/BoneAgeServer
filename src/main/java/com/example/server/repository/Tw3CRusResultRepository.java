@@ -4,7 +4,14 @@ import com.example.server.model.Tw3CRusResult;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+
+import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 
 @Repository
 public class Tw3CRusResultRepository {
@@ -40,7 +47,7 @@ public class Tw3CRusResultRepository {
             )""");
     }
 
-    public void save(Tw3CRusResult result) {
+    public Long save(Tw3CRusResult result) {
         String sql = """
             INSERT INTO TW3_C_RUS_Result (
                 MCPFirst, MCPThird, MCPFifth,
@@ -51,23 +58,36 @@ public class Tw3CRusResultRepository {
                 UpdateTime
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""";
 
-        jdbcTemplate.update(sql,
-                result.getMcpFirst(),
-                result.getMcpThird(),
-                result.getMcpFifth(),
-                result.getPipFirst(),
-                result.getPipThird(),
-                result.getPipFifth(),
-                result.getMipThird(),
-                result.getMipFifth(),
-                result.getDipFirst(),
-                result.getDipThird(),
-                result.getDipFifth(),
-                result.getRadius(),
-                result.getUlna(),
-                result.getTotal(),
-                result.getBoneAge(),
-                result.getUpdateTime()
-        );
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(
+                    sql,
+                    Statement.RETURN_GENERATED_KEYS
+            );
+
+            // 设置参数
+            int index = 1;
+            ps.setObject(index++, result.getMcpFirst());
+            ps.setObject(index++, result.getMcpThird());
+            ps.setObject(index++, result.getMcpFifth());
+            ps.setObject(index++, result.getPipFirst());
+            ps.setObject(index++, result.getPipThird());
+            ps.setObject(index++, result.getPipFifth());
+            ps.setObject(index++, result.getMipThird());
+            ps.setObject(index++, result.getMipFifth());
+            ps.setObject(index++, result.getDipFirst());
+            ps.setObject(index++, result.getDipThird());
+            ps.setObject(index++, result.getDipFifth());
+            ps.setObject(index++, result.getRadius());
+            ps.setObject(index++, result.getUlna());
+            ps.setObject(index++, result.getTotal());
+            ps.setObject(index++, result.getBoneAge());
+            ps.setTimestamp(index, Timestamp.valueOf(LocalDateTime.now()));
+
+            return ps;
+        }, keyHolder);
+
+        return keyHolder.getKey().longValue();
     }
 }

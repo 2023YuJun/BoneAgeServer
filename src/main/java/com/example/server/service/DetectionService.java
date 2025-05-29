@@ -107,7 +107,10 @@ public class DetectionService {
             }
 
             // 打包最终结果
-            return packageResults(detections);
+            Map<String, Object> resultMap = new HashMap<>(packageResults(detections));
+            Long detectionId = saveDetectionData(detections);
+            resultMap.put("detectionId", detectionId);
+            return resultMap;
         }
     }
 
@@ -320,7 +323,6 @@ public class DetectionService {
                         Collectors.mapping(this::convertToMap, Collectors.toList())
                 ));
 
-        saveDetectionData(detections);
         return Collections.singletonMap("results", resultMap);
     }
 
@@ -363,7 +365,7 @@ public class DetectionService {
         return map;
     }
 
-    private void saveDetectionData(List<DetectionResult> detections) {
+    private Long saveDetectionData(List<DetectionResult> detections) {
         DetectionInfo info = new DetectionInfo();
 
         // 遍历检测结果填充数据
@@ -387,10 +389,10 @@ public class DetectionService {
         });
 
         try {
-            detectionRepo.save(info);
+            return detectionRepo.save(info);
         } catch (Exception e) {
             System.err.println("数据库保存失败: " + e.getMessage());
-            // 可添加重试逻辑或异常处理
+            return null;
         }
     }
 

@@ -70,23 +70,46 @@ public class ClassifyService {
 
     // 主分类方法
     public Map<String, Integer> classify(Map<String, Object> detectionResults, BufferedImage originImage) {
+        // 初始化结果Map，所有键值设为-1
         Map<String, Integer> classificationResults = new HashMap<>();
+        for (String key : MODEL_MAPPING.keySet()) {
+            classificationResults.put(key, -1);
+        }
+
         try {
             @SuppressWarnings("unchecked")
             Map<String, List<Map<String, Object>>> results =
                     (Map<String, List<Map<String, Object>>>) detectionResults.get("results");
 
+            // 确保结果包含所有关节类型
+            Set<String> detectedJoints = new HashSet<>(results.keySet());
+            for (String joint : MODEL_MAPPING.keySet()) {
+                if (!detectedJoints.contains(joint)) {
+                    System.err.println("警告: 检测结果中缺少关节类型: " + joint);
+                    // 已经初始化为-1，无需额外操作
+                }
+            }
+
             for (Map.Entry<String, List<Map<String, Object>>> entry : results.entrySet()) {
                 String className = entry.getKey();
                 String modelName = MODEL_MAPPING.get(className);
 
-                // 检查模型是否加载成功
-                if (!modelSessions.containsKey(modelName)) {
-                    System.err.println("警告: " + className + " 的模型 " + modelName + " 未加载");
+                // 如果模型名称未定义，跳过
+                if (modelName == null) {
+                    System.err.println("警告: " + className + " 未定义模型映射");
                     continue;
                 }
 
-                for (Map<String, Object> detection : entry.getValue()) {
+                // 检查模型是否加载成功
+                if (!modelSessions.containsKey(modelName)) {
+                    System.err.println("警告: " + className + " 的模型 " + modelName + " 未加载");
+                    // 保持默认值-1
+                    continue;
+                }
+
+                // 只处理第一个检测框（每个关节只应有一个检测结果）
+                if (!entry.getValue().isEmpty()) {
+                    Map<String, Object> detection = entry.getValue().getFirst();
                     float[] bbox = (float[]) detection.get("bbox");
                     BufferedImage crop = cropImage(originImage, bbox);
 
@@ -95,12 +118,14 @@ public class ClassifyService {
                         classificationResults.put(className, result);
                     } catch (Exception e) {
                         System.err.println(className + " 分类失败: " + e.getMessage());
+                        // 分类失败时保持-1
                     }
                 }
             }
         } catch (Exception e) {
             System.err.println("分类流程异常: " + e.getMessage());
         }
+
         return classificationResults;
     }
 

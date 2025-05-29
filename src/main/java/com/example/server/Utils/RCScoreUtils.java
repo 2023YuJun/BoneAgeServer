@@ -12,7 +12,7 @@ import java.util.*;
 public class RCScoreUtils {
     private static final PolynomialSplineFunction maleSpline;
     private static final PolynomialSplineFunction femaleSpline;
-    private static final Map<Boolean, Map<String, List<Integer>>> SCORE_TABLES;
+    public static final Map<Boolean, Map<String, List<Integer>>> SCORE_TABLES;
 
     static {
         // 初始化性别-部位-分数表
@@ -90,7 +90,7 @@ public class RCScoreUtils {
      * @param partIndices 部位索引
      * @return 总分
      */
-    private static int calculateTotalScore(boolean isMale, Map<String, Integer> partIndices) {
+    public static int calculateTotalScore(boolean isMale, Map<String, Integer> partIndices) {
         Map<String, List<Integer>> scores = SCORE_TABLES.get(isMale);
         if (scores == null) {
             throw new IllegalArgumentException("无效的性别标识");
@@ -100,16 +100,12 @@ public class RCScoreUtils {
         for (Map.Entry<String, Integer> entry : partIndices.entrySet()) {
             String part = entry.getKey();
             int externalIndex = entry.getValue();
-            int internalIndex = externalIndex - 1;
             List<Integer> partScores = scores.get(part);
-            if (partScores == null) {
-                throw new IllegalArgumentException("无效的部位: " + part);
-            }
+            if (partScores == null) continue;
+
+            int internalIndex = externalIndex - 1;
             if (internalIndex < 0 || internalIndex >= partScores.size()) {
-                throw new IllegalArgumentException(
-                        String.format("部位 %s 的索引越界: 输入值=%d (有效范围: 1-%d)",
-                                part, externalIndex, partScores.size())
-                );
+                continue;
             }
             total += partScores.get(internalIndex);
         }

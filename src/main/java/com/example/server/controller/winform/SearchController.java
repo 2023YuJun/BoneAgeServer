@@ -2,8 +2,11 @@ package com.example.server.controller.winform;
 
 import com.example.server.Utils.RCScoreUtils;
 import com.example.server.Utils.TRScoreUtils;
+import com.example.server.model.InferenceInfo;
 import com.example.server.model.PatientInfo;
+import com.example.server.repository.InferenceInfoRepository;
 import com.example.server.repository.PatientInfoRepository;
+import com.example.server.service.BoneAgeService;
 import com.example.server.service.DICOMService;
 import com.example.server.service.DetectionService;
 import com.example.server.service.ClassifyService;
@@ -23,6 +26,7 @@ import java.io.File;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @RestController
@@ -32,21 +36,29 @@ public class SearchController {
     private static final String ERROR_KEY = "error";
     private static final String MESSAGE_KEY = "message";
 
+    private final Map<String, Long> sopToPidMap = new ConcurrentHashMap<>();
+
     private final DICOMService dicomService;
     private final DetectionService detectionService;
     private final ClassifyService classifyService;
+    private final BoneAgeService boneAgeService;
     private final PatientInfoRepository patientInfoRepository;
+    private final InferenceInfoRepository inferenceInfoRepository;
 
     public SearchController(
             DICOMService dicomService,
             DetectionService detectionService,
             ClassifyService classifyService,
-            PatientInfoRepository patientInfoRepository
+            BoneAgeService boneAgeService,
+            PatientInfoRepository patientInfoRepository,
+            InferenceInfoRepository inferenceInfoRepository
     ) {
         this.dicomService = dicomService;
         this.detectionService = detectionService;
         this.classifyService = classifyService;
+        this.boneAgeService = boneAgeService;
         this.patientInfoRepository = patientInfoRepository;
+        this.inferenceInfoRepository = inferenceInfoRepository;
     }
 
     /**
@@ -99,6 +111,18 @@ public class SearchController {
         List<String> pngPaths = new ArrayList<>();
         LocalDate birthDate = parseDicomDate(birthDateStr);
 
+        // 获取数据库中该患者未完成的记录
+        List<PatientInfo> unprocessedRecords = patientInfoRepository.findUnprocessedRecords(patientID);
+
+        // 优先处理未完成的记录
+        for (PatientInfo record : unprocessedRecords) {
+            String pngPath = processUnprocessedRecord(record);
+            if (pngPath != null) {
+                pngPaths.add(pngPath);
+            }
+        }
+
+
         // 获取数据库中该患者最新的Study日期
         LocalDate latestStudyDateInDB = patientInfoRepository.findLatestStudyDateByPatient(patientID);
 
@@ -107,8 +131,8 @@ public class SearchController {
             LocalDate studyDate = parseDicomDate(studyDateStr);
 
             if (latestStudyDateInDB != null &&
-                    !studyDate.isAfter(latestStudyDateInDB)) {
-                continue;
+                    (studyDate == null || !studyDate.isAfter(latestStudyDateInDB))) {
+                continue; // 跳过旧记录
             }
 
             String studyUID = study.getString(Tag.StudyInstanceUID);
@@ -153,6 +177,40 @@ public class SearchController {
     }
 
     /**
+     * 处理未完成的记录
+     */
+    private String processUnprocessedRecord(PatientInfo patientInfo) {
+        try {
+            // 检查必要字段是否为空
+            if (patientInfo.getStudyInstanceUID() == null ||
+                    patientInfo.getSeriesInstanceUID() == null ||
+                    patientInfo.getSOPInstanceUID() == null ||
+                    patientInfo.getStudyDate() == null) {
+
+                System.err.println("患者记录 " + patientInfo.getPID() + " 缺少必要信息，无法处理");
+                return null;
+            }
+
+            // 重新下载图像
+            String downloadUrl = dicomService.buildDownloadUrl(
+                    patientInfo.getStudyInstanceUID(),
+                    patientInfo.getSeriesInstanceUID(),
+                    patientInfo.getSOPInstanceUID(),
+                    patientInfo.getStudyDate().toString().replace("-", ""),
+                    patientInfo.getPatientID()
+            );
+
+            return dicomService.downloadAndConvertToPng(
+                    downloadUrl,
+                    patientInfo.getSOPInstanceUID()
+            );
+        } catch (Exception e) {
+            System.err.println("重新下载图像失败: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 图像处理流程
      */
     private CompletableFuture<ResponseEntity<?>> processPngPaths(List<String> pngPaths, boolean isMale) throws Exception {
@@ -175,20 +233,57 @@ public class SearchController {
             }
 
             // 3. 调用两个骨龄计算工具
-            try {
-                RCScoreUtils.calculateBoneAge(isMale, classifyResult);
-                TRScoreUtils.calculateBoneAge(isMale, classifyResult);
-            } catch (IllegalArgumentException e) {
-                return completedErrorResponse(HttpStatus.BAD_REQUEST, e.getMessage());
-            } catch (Exception e) {
+            Map<String, Object> rusResult = boneAgeService.processRusChn(isMale, classifyResult);
+            Map<String, Object> tw3Result = boneAgeService.processTw3CRus(isMale, classifyResult);
+
+            // 4. 保存推理信息
+            InferenceInfo inferenceInfo = new InferenceInfo();
+
+            // 安全处理 DetectionID
+            Object detectionIdObj = detectionResult.get("detectionId");
+            if (detectionIdObj instanceof Number) {
+                inferenceInfo.setDetectionID(((Number) detectionIdObj).longValue());
+            } else {
+                System.err.println("检测ID类型错误: " + detectionIdObj);
                 return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "骨龄计算失败: " + e.getMessage());
+                        "检测ID类型错误");
+            }
+
+            // 安全处理 RCResultID
+            Object rcResultIdObj = rusResult.get("rcResultId");
+            if (rcResultIdObj instanceof Number) {
+                inferenceInfo.setRCResultID(((Number) rcResultIdObj).longValue());
+            } else {
+                System.err.println("RUS结果ID类型错误: " + rcResultIdObj);
+                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "RUS结果ID类型错误");
+            }
+
+            // 安全处理 TCRResultID
+            Object tcrResultIdObj = tw3Result.get("tcrResultId");
+            if (tcrResultIdObj instanceof Number) {
+                inferenceInfo.setTCRResultID(((Number) tcrResultIdObj).longValue());
+            } else {
+                System.err.println("TW3结果ID类型错误: " + tcrResultIdObj);
+                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                        "TW3结果ID类型错误");
+            }
+
+            inferenceInfo.setTCCResultID(null);
+
+            // 保存推理信息并获取InferenceID
+            Long inferenceID = inferenceInfoRepository.save(inferenceInfo);
+
+            // 5. 更新患者信息的InferenceID
+            String sopUID = extractSopUIDFromPath(pngPath);
+            Long pid = sopToPidMap.get(sopUID);
+            if (pid != null) {
+                patientInfoRepository.updateInferenceID(pid, inferenceID);
             }
         }
 
         return CompletableFuture.completedFuture(
-                ResponseEntity.ok(Map.of(MESSAGE_KEY, "推理成功"))
-        );
+                ResponseEntity.ok(Map.of(MESSAGE_KEY, "推理成功")));
     }
 
     /**
@@ -238,10 +333,16 @@ public class SearchController {
         patientInfo.setInferenceID(null);
 
         try {
-            patientInfoRepository.save(patientInfo);
+            Long pid = patientInfoRepository.save(patientInfo);
+            sopToPidMap.put(sopUID, pid);
         } catch (Exception e) {
             System.err.println("保存患者信息失败: " + e.getMessage());
         }
+    }
+
+    private String extractSopUIDFromPath(String pngPath) {
+        // 从路径中提取SOPInstanceUID
+        return new File(pngPath).getName().replace(".png", "");
     }
 
     /**

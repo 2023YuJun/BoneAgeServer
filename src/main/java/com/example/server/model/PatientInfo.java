@@ -16,4 +16,5 @@ public class PatientInfo {
     private Long InferenceID;
     private LocalDate StudyDate;
     private LocalDateTime CreateTime;
+
 }

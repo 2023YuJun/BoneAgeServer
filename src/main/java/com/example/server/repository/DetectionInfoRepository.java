@@ -3,8 +3,12 @@ package com.example.server.repository;
 import com.example.server.model.DetectionInfo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 import javax.sql.DataSource;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 
 @Repository
 public class DetectionInfoRepository {
@@ -36,7 +40,7 @@ public class DetectionInfoRepository {
             )""");
     }
 
-    public void save(DetectionInfo detectionInfo) {
+    public Long save(DetectionInfo detectionInfo) {
         String sql = """
             INSERT INTO DetectionInfo (
                 MCPFirst, MCPThird, MCPFifth, 
@@ -46,20 +50,32 @@ public class DetectionInfoRepository {
                 Radius, Ulna
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""";
 
-        jdbcTemplate.update(sql,
-                detectionInfo.getMCPFirst(),
-                detectionInfo.getMCPThird(),
-                detectionInfo.getMCPFifth(),
-                detectionInfo.getPIPFirst(),
-                detectionInfo.getPIPThird(),
-                detectionInfo.getPIPFifth(),
-                detectionInfo.getMIPThird(),
-                detectionInfo.getMIPFifth(),
-                detectionInfo.getDIPFirst(),
-                detectionInfo.getDIPThird(),
-                detectionInfo.getDIPFifth(),
-                detectionInfo.getRadius(),
-                detectionInfo.getUlna()
-        );
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(
+                    sql,
+                    Statement.RETURN_GENERATED_KEYS
+            );
+
+            int index = 1;
+            ps.setString(index++, detectionInfo.getMCPFirst());
+            ps.setString(index++, detectionInfo.getMCPThird());
+            ps.setString(index++, detectionInfo.getMCPFifth());
+            ps.setString(index++, detectionInfo.getPIPFirst());
+            ps.setString(index++, detectionInfo.getPIPThird());
+            ps.setString(index++, detectionInfo.getPIPFifth());
+            ps.setString(index++, detectionInfo.getMIPThird());
+            ps.setString(index++, detectionInfo.getMIPFifth());
+            ps.setString(index++, detectionInfo.getDIPFirst());
+            ps.setString(index++, detectionInfo.getDIPThird());
+            ps.setString(index++, detectionInfo.getDIPFifth());
+            ps.setString(index++, detectionInfo.getRadius());
+            ps.setString(index++, detectionInfo.getUlna());
+
+            return ps;
+        }, keyHolder);
+
+        return keyHolder.getKey().longValue();
     }
 }

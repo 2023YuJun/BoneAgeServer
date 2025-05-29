@@ -3,9 +3,12 @@ package com.example.server.repository;
 import com.example.server.model.InferenceInfo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import javax.sql.DataSource;
+import java.sql.PreparedStatement;
 
 @Repository
 public class InferenceInfoRepository {
@@ -22,10 +25,10 @@ public class InferenceInfoRepository {
         jdbcTemplate.execute("""
             CREATE TABLE IF NOT EXISTS inference_info (
                 InferenceID INTEGER PRIMARY KEY AUTOINCREMENT,
-                DetectionID INTEGER NOT NULL,
-                RCResultID INTEGER NOT NULL,
-                TCRResultID INTEGER NOT NULL,
-                TCCResultID INTEGER NOT NULL,
+                DetectionID INTEGER,
+                RCResultID INTEGER,
+                TCRResultID INTEGER,
+                TCCResultID INTEGER,
                 FOREIGN KEY (DetectionID) REFERENCES DetectionInfo(DetectionID),
                 FOREIGN KEY (RCResultID) REFERENCES RUS_CHN_Result(RCResultID),
                 FOREIGN KEY (TCRResultID) REFERENCES TW3_C_RUS_Result(TCRResultID),
@@ -33,8 +36,19 @@ public class InferenceInfoRepository {
             )""");
     }
 
-    public void save(InferenceInfo inferenceInfo) {
+    public Long save(InferenceInfo inferenceInfo) {
         String sql = "INSERT INTO inference_info (DetectionID, RCResultID, TCRResultID, TCCResultID) VALUES (?, ?, ?, ?)";
-        jdbcTemplate.update(sql, inferenceInfo.getDetectionID(), inferenceInfo.getRCResultID(), inferenceInfo.getTCRResultID(), inferenceInfo.getTCCResultID());
+
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(sql, new String[]{"InferenceID"});
+            ps.setObject(1, inferenceInfo.getDetectionID());
+            ps.setObject(2, inferenceInfo.getRCResultID());
+            ps.setObject(3, inferenceInfo.getTCRResultID());
+            ps.setObject(4, inferenceInfo.getTCCResultID());
+            return ps;
+        }, keyHolder);
+
+        return keyHolder.getKey().longValue();
     }
 }
