@@ -164,7 +164,7 @@ public class TRScoreUtils {
      * @param originalGrade 原始等级（外部输入的1-based索引）
      * @return 转换后的等级（1-based）
      */
-    private static int mapGrade(String part, int originalGrade) {
+    public static int mapGrade(String part, int originalGrade) {
         // 检查是否为有效等级
         if (originalGrade < 1) {
             throw new IllegalArgumentException("无效的等级值: " + originalGrade);
@@ -204,7 +204,7 @@ public class TRScoreUtils {
      * @param partIndices 部位索引
      * @return 总分
      */
-    private static int calculateTotalScore(boolean isMale, Map<String, Integer> partIndices) {
+    public static int calculateTotalScore(boolean isMale, Map<String, Integer> partIndices) {
         Map<String, List<Integer>> scores = SCORE_TABLES.get(isMale);
         if (scores == null) {
             throw new IllegalArgumentException("无效的性别标识");
@@ -214,20 +214,26 @@ public class TRScoreUtils {
         for (Map.Entry<String, Integer> entry : partIndices.entrySet()) {
             String part = entry.getKey();
             int externalIndex = entry.getValue();
-            // 进行等级映射
-            int mappedGrade = mapGrade(part, externalIndex);
-            int internalIndex = mappedGrade - 1;
+
+            // 检查越界情况
             List<Integer> partScores = scores.get(part);
-            if (partScores == null) {
-                throw new IllegalArgumentException("无效的部位: " + part);
+            if (partScores == null) continue; // 无效部位跳过
+
+            // 获取映射后的等级（可能返回-1）
+            int mappedGrade;
+            try {
+                mappedGrade = mapGrade(part, externalIndex);
+            } catch (IllegalArgumentException e) {
+                mappedGrade = -1;
             }
-            if (internalIndex < 0 || internalIndex >= partScores.size()) {
-                throw new IllegalArgumentException(
-                        String.format("部位 %s 的索引越界: 输入值=%d (有效范围: 1-%d)",
-                                part, externalIndex, partScores.size())
-                );
+
+            // 计算有效分数
+            if (mappedGrade != -1) {
+                int internalIndex = mappedGrade - 1;
+                if (internalIndex >= 0 && internalIndex < partScores.size()) {
+                    total += partScores.get(internalIndex);
+                }
             }
-            total += partScores.get(internalIndex);
         }
         return total;
     }

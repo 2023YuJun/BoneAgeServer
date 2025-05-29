@@ -4,7 +4,7 @@ import lombok.Data;
 
 @Data
 public class DetectionInfo {
-    private Integer detectionId;
+    private Long detectionId;
     private String MCPFirst;
     private String MCPThird;
     private String MCPFifth;
