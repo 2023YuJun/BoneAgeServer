@@ -11,7 +11,9 @@ import org.springframework.stereotype.Repository;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
+import java.util.Date;
 
 @Repository
 public class Tw3CRusResultRepository {
@@ -83,7 +85,7 @@ public class Tw3CRusResultRepository {
             ps.setObject(index++, result.getUlna());
             ps.setObject(index++, result.getTotal());
             ps.setObject(index++, result.getBoneAge());
-            ps.setTimestamp(index, Timestamp.valueOf(LocalDateTime.now()));
+            ps.setString(index, new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
 
             return ps;
         }, keyHolder);

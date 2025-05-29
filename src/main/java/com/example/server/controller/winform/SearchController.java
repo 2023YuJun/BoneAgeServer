@@ -1,18 +1,11 @@
 package com.example.server.controller.winform;
 
-import com.example.server.Utils.RCScoreUtils;
-import com.example.server.Utils.TRScoreUtils;
-import com.example.server.model.InferenceInfo;
 import com.example.server.model.PatientInfo;
-import com.example.server.repository.InferenceInfoRepository;
 import com.example.server.repository.PatientInfoRepository;
-import com.example.server.service.BoneAgeService;
-import com.example.server.service.DICOMService;
-import com.example.server.service.DetectionService;
-import com.example.server.service.ClassifyService;
-import org.apache.commons.imaging.Imaging;
+import com.example.server.service.*;
 import org.dcm4che3.data.Attributes;
 import org.dcm4che3.data.Tag;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
@@ -21,8 +14,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.awt.image.BufferedImage;
-import java.io.File;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -35,30 +26,25 @@ public class SearchController {
     private static final String HAND_SERIES_DESCRIPTION = "Hand";
     private static final String ERROR_KEY = "error";
     private static final String MESSAGE_KEY = "message";
+    private static final String URL_KEY = "url";
+
+    @Value("${frontend.url}")
+    private String frontendUrl;
 
     private final Map<String, Long> sopToPidMap = new ConcurrentHashMap<>();
 
     private final DICOMService dicomService;
-    private final DetectionService detectionService;
-    private final ClassifyService classifyService;
-    private final BoneAgeService boneAgeService;
     private final PatientInfoRepository patientInfoRepository;
-    private final InferenceInfoRepository inferenceInfoRepository;
+    private final ImageProcessingService imageProcessingService;
 
     public SearchController(
             DICOMService dicomService,
-            DetectionService detectionService,
-            ClassifyService classifyService,
-            BoneAgeService boneAgeService,
             PatientInfoRepository patientInfoRepository,
-            InferenceInfoRepository inferenceInfoRepository
+            ImageProcessingService imageProcessingService
     ) {
         this.dicomService = dicomService;
-        this.detectionService = detectionService;
-        this.classifyService = classifyService;
-        this.boneAgeService = boneAgeService;
         this.patientInfoRepository = patientInfoRepository;
-        this.inferenceInfoRepository = inferenceInfoRepository;
+        this.imageProcessingService = imageProcessingService;
     }
 
     /**
@@ -92,7 +78,12 @@ public class SearchController {
 
             boolean isMale = sex.equalsIgnoreCase("M");
 
-            return processPngPaths(pngPaths, isMale);
+            asyncProcessImages(pngPaths, isMale);
+
+            Map<String, String> responseMap = new HashMap<>();
+            responseMap.put(MESSAGE_KEY, "推理成功");
+            responseMap.put(URL_KEY, frontendUrl + patientID);
+            return CompletableFuture.completedFuture(ResponseEntity.ok(responseMap));
 
         } catch (Exception e) {
             return CompletableFuture.completedFuture(handleException(e));
@@ -211,79 +202,16 @@ public class SearchController {
     }
 
     /**
-     * 图像处理流程
+     * 异步处理所有图像
      */
-    private CompletableFuture<ResponseEntity<?>> processPngPaths(List<String> pngPaths, boolean isMale) throws Exception {
+    private void asyncProcessImages(List<String> pngPaths, boolean isMale) {
         for (String pngPath : pngPaths) {
-            BufferedImage originImage = Imaging.getBufferedImage(new File(pngPath));
-            // 1. 调用检测服务
-            Map<String, Object> detectionResult = detectionService.detect(originImage);
-            if (detectionResult.containsKey(ERROR_KEY)) {
-                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "检测失败: " + detectionResult.get(ERROR_KEY));
-            }
-
-            // 2. 调用分类服务
-            Map<String, Integer> classifyResult;
-            try {
-                classifyResult = classifyService.classify(detectionResult, originImage);
-            } catch (Exception e) {
-                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "分类失败: " + e.getMessage());
-            }
-
-            // 3. 调用两个骨龄计算工具
-            Map<String, Object> rusResult = boneAgeService.processRusChn(isMale, classifyResult);
-            Map<String, Object> tw3Result = boneAgeService.processTw3CRus(isMale, classifyResult);
-
-            // 4. 保存推理信息
-            InferenceInfo inferenceInfo = new InferenceInfo();
-
-            // 安全处理 DetectionID
-            Object detectionIdObj = detectionResult.get("detectionId");
-            if (detectionIdObj instanceof Number) {
-                inferenceInfo.setDetectionID(((Number) detectionIdObj).longValue());
-            } else {
-                System.err.println("检测ID类型错误: " + detectionIdObj);
-                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "检测ID类型错误");
-            }
-
-            // 安全处理 RCResultID
-            Object rcResultIdObj = rusResult.get("rcResultId");
-            if (rcResultIdObj instanceof Number) {
-                inferenceInfo.setRCResultID(((Number) rcResultIdObj).longValue());
-            } else {
-                System.err.println("RUS结果ID类型错误: " + rcResultIdObj);
-                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "RUS结果ID类型错误");
-            }
-
-            // 安全处理 TCRResultID
-            Object tcrResultIdObj = tw3Result.get("tcrResultId");
-            if (tcrResultIdObj instanceof Number) {
-                inferenceInfo.setTCRResultID(((Number) tcrResultIdObj).longValue());
-            } else {
-                System.err.println("TW3结果ID类型错误: " + tcrResultIdObj);
-                return completedErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
-                        "TW3结果ID类型错误");
-            }
-
-            inferenceInfo.setTCCResultID(null);
-
-            // 保存推理信息并获取InferenceID
-            Long inferenceID = inferenceInfoRepository.save(inferenceInfo);
-
-            // 5. 更新患者信息的InferenceID
-            String sopUID = extractSopUIDFromPath(pngPath);
-            Long pid = sopToPidMap.get(sopUID);
-            if (pid != null) {
-                patientInfoRepository.updateInferenceID(pid, inferenceID);
-            }
+            imageProcessingService.processImageAsync(pngPath, isMale)
+                    .exceptionally(ex -> {
+                        System.err.println("异步处理图像失败: " + ex.getMessage());
+                        return null;
+                    });
         }
-
-        return CompletableFuture.completedFuture(
-                ResponseEntity.ok(Map.of(MESSAGE_KEY, "推理成功")));
     }
 
     /**
@@ -338,11 +266,6 @@ public class SearchController {
         } catch (Exception e) {
             System.err.println("保存患者信息失败: " + e.getMessage());
         }
-    }
-
-    private String extractSopUIDFromPath(String pngPath) {
-        // 从路径中提取SOPInstanceUID
-        return new File(pngPath).getName().replace(".png", "");
     }
 
     /**
