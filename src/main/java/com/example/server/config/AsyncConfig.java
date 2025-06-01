@@ -27,15 +27,15 @@ public class AsyncConfig implements AsyncConfigurer {
     // DICOM操作线程池
     @Bean(name = "dicomTaskExecutor")
     public ScheduledExecutorService dicomTaskExecutor() {
-        return Executors.newScheduledThreadPool(10);
+        return Executors.newScheduledThreadPool(20);
     }
 
     // 图像处理线程池
     @Bean(name = "imageProcessingExecutor")
     public Executor imageProcessingExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5); // 核心线程数
-        executor.setMaxPoolSize(10); // 最大线程数
+        executor.setCorePoolSize(16); // 核心线程数
+        executor.setMaxPoolSize(32); // 最大线程数
         executor.setQueueCapacity(100); // 队列容量
         executor.setThreadNamePrefix("ImageProcessor-");
         executor.initialize();

@@ -106,7 +106,7 @@ public class DICOMService {
     }
 
     private List<Attributes> queryWithRetry(Attributes keys) {
-        final int maxRetries = 5;
+        final int maxRetries = 3;
         int retryDelay = 1;
         List<Attributes> results = new ArrayList<>();
         Exception lastException = null;
@@ -144,7 +144,7 @@ public class DICOMService {
                 synchronized (lock) {
                     while (!completed.get()) {
                         try {
-                            lock.wait(60000); // 最多等待60秒
+                            lock.wait(30000); // 最多等待60秒
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
@@ -158,7 +158,7 @@ public class DICOMService {
                         attempt + 1, maxRetries, e.getClass().getSimpleName(), e.getMessage());
                 // 打印堆栈跟踪（调试阶段启用）
                 e.printStackTrace();
-                try { Thread.sleep(retryDelay * 1000L); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(retryDelay * 200L); } catch (InterruptedException ignored) {}
                 retryDelay *= 2;
             } finally {
                 if (association != null) {

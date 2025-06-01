@@ -13,6 +13,7 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
@@ -151,6 +152,62 @@ public class PatientInfoRepository {
                 }
             } else {
                 info.setStudyDate(null);
+            }
+
+            return info;
+        });
+    }
+
+    public List<PatientInfo> findByPatientID(String patientID) {
+        String sql = "SELECT * FROM patient_info WHERE PatientID = ?";
+        return jdbcTemplate.query(sql, new Object[]{patientID}, (rs, rowNum) -> {
+            PatientInfo info = new PatientInfo();
+            // 安全处理 PID (Long)
+            Object pidObj = rs.getObject("PID");
+            if (pidObj instanceof Number) {
+                info.setPID(((Number) pidObj).longValue());
+            }
+            info.setPatientID(rs.getString("PatientID"));
+
+            // 安全解析 BrithDate
+            String birthDateStr = rs.getString("BrithDate");
+            if (birthDateStr != null && !birthDateStr.isEmpty()) {
+                try {
+                    info.setBrithDate(LocalDate.parse(birthDateStr));
+                } catch (Exception e) {
+                    System.err.println("解析 BrithDate 失败: " + birthDateStr);
+                }
+            }
+
+            info.setSex(rs.getString("Sex"));
+            info.setStudyInstanceUID(rs.getString("StudyInstanceUID"));
+            info.setSeriesInstanceUID(rs.getString("SeriesInstanceUID"));
+            info.setSOPInstanceUID(rs.getString("SOPInstanceUID"));
+
+            // 安全处理 InferenceID (Long)
+            Object inferenceIdObj = rs.getObject("InferenceID");
+            if (inferenceIdObj instanceof Number) {
+                info.setInferenceID(((Number) inferenceIdObj).longValue());
+            }
+
+            // 安全解析 StudyDate
+            String studyDateStr = rs.getString("StudyDate");
+            if (studyDateStr != null && !studyDateStr.isEmpty()) {
+                try {
+                    info.setStudyDate(LocalDate.parse(studyDateStr));
+                } catch (Exception e) {
+                    System.err.println("解析 StudyDate 失败: " + studyDateStr);
+                }
+            }
+
+            // 添加 createTime 字段处理
+            Object createTimeObj = rs.getObject("CreateTime");
+            if (createTimeObj != null) {
+                try {
+                    info.setCreateTime(LocalDateTime.parse(createTimeObj.toString()));
+                } catch (Exception e) {
+                    System.err.println("解析 CreateTime 失败: " + createTimeObj);
+                }
             }
 
             return info;

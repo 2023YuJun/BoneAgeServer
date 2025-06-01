@@ -3,6 +3,7 @@ package com.example.server.repository;
 import com.example.server.model.RusChnResult;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -91,5 +92,76 @@ public class RusChnResultRepository {
         }, keyHolder);
 
         return keyHolder.getKey().longValue();
+    }
+
+    public RusChnResult findById(Long rcResultId) {
+        String sql = "SELECT * FROM RUS_CHN_Result WHERE RCResultID = ?";
+        try {
+            return jdbcTemplate.queryForObject(sql, new Object[]{rcResultId}, (rs, rowNum) -> {
+                RusChnResult result = new RusChnResult();
+                result.setRcResultId(rs.getInt("RCResultID"));
+                result.setMcpFirst(rs.getInt("MCPFirst"));
+                result.setMcpThird(rs.getInt("MCPThird"));
+                result.setMcpFifth(rs.getInt("MCPFifth"));
+                result.setPipFirst(rs.getInt("PIPFirst"));
+                result.setPipThird(rs.getInt("PIPThird"));
+                result.setPipFifth(rs.getInt("PIPFifth"));
+                result.setMipThird(rs.getInt("MIPThird"));
+                result.setMipFifth(rs.getInt("MIPFifth"));
+                result.setDipFirst(rs.getInt("DIPFirst"));
+                result.setDipThird(rs.getInt("DIPThird"));
+                result.setDipFifth(rs.getInt("DIPFifth"));
+                result.setRadius(rs.getInt("Radius"));
+                result.setUlna(rs.getInt("Ulna"));
+                result.setTotal(rs.getInt("Total"));
+                result.setBoneAge(rs.getDouble("BoneAge"));
+
+                // 添加时间字段处理
+                Object createTime = rs.getObject("CreateTime");
+                if (createTime != null) {
+                    result.setCreateTime(LocalDateTime.parse(createTime.toString().replace(" ", "T")));
+                }
+
+                Object updateTime = rs.getObject("UpdateTime");
+                if (updateTime != null) {
+                    result.setUpdateTime(LocalDateTime.parse(updateTime.toString().replace(" ", "T")));
+                }
+
+                return result;
+            });
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
+    }
+
+    public int update(RusChnResult result) {
+        String sql = """
+            UPDATE RUS_CHN_Result SET
+                MCPFirst = ?, MCPThird = ?, MCPFifth = ?,
+                PIPFirst = ?, PIPThird = ?, PIPFifth = ?,
+                MIPThird = ?, MIPFifth = ?,
+                DIPFirst = ?, DIPThird = ?, DIPFifth = ?,
+                Radius = ?, Ulna = ?, Total = ?, BoneAge = ?,
+                UpdateTime = ?
+            WHERE RCResultID = ?""";
+
+        return jdbcTemplate.update(sql,
+                result.getMcpFirst(),
+                result.getMcpThird(),
+                result.getMcpFifth(),
+                result.getPipFirst(),
+                result.getPipThird(),
+                result.getPipFifth(),
+                result.getMipThird(),
+                result.getMipFifth(),
+                result.getDipFirst(),
+                result.getDipThird(),
+                result.getDipFifth(),
+                result.getRadius(),
+                result.getUlna(),
+                result.getTotal(),
+                result.getBoneAge(),
+                Timestamp.valueOf(LocalDateTime.now()),
+                result.getRcResultId());
     }
 }

@@ -3,6 +3,7 @@ package com.example.server.repository;
 import com.example.server.model.Tw3CRusResult;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -91,5 +92,76 @@ public class Tw3CRusResultRepository {
         }, keyHolder);
 
         return keyHolder.getKey().longValue();
+    }
+
+    public Tw3CRusResult findById(Long tcrResultId) {
+        String sql = "SELECT * FROM TW3_C_RUS_Result WHERE TCRResultID = ?";
+        try {
+            return jdbcTemplate.queryForObject(sql, new Object[]{tcrResultId}, (rs, rowNum) -> {
+                Tw3CRusResult result = new Tw3CRusResult();
+                result.setTcrResultId(rs.getLong("TCRResultID"));
+                result.setMcpFirst(rs.getInt("MCPFirst"));
+                result.setMcpThird(rs.getInt("MCPThird"));
+                result.setMcpFifth(rs.getInt("MCPFifth"));
+                result.setPipFirst(rs.getInt("PIPFirst"));
+                result.setPipThird(rs.getInt("PIPThird"));
+                result.setPipFifth(rs.getInt("PIPFifth"));
+                result.setMipThird(rs.getInt("MIPThird"));
+                result.setMipFifth(rs.getInt("MIPFifth"));
+                result.setDipFirst(rs.getInt("DIPFirst"));
+                result.setDipThird(rs.getInt("DIPThird"));
+                result.setDipFifth(rs.getInt("DIPFifth"));
+                result.setRadius(rs.getInt("Radius"));
+                result.setUlna(rs.getInt("Ulna"));
+                result.setTotal(rs.getInt("Total"));
+                result.setBoneAge(rs.getDouble("BoneAge"));
+
+                // 添加时间字段处理
+                Object createTime = rs.getObject("CreateTime");
+                if (createTime != null) {
+                    result.setCreateTime(LocalDateTime.parse(createTime.toString().replace(" ", "T")));
+                }
+
+                Object updateTime = rs.getObject("UpdateTime");
+                if (updateTime != null) {
+                    result.setUpdateTime(LocalDateTime.parse(updateTime.toString().replace(" ", "T")));
+                }
+
+                return result;
+            });
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
+    }
+
+    public int update(Tw3CRusResult result) {
+        String sql = """
+            UPDATE TW3_C_RUS_Result SET
+                MCPFirst = ?, MCPThird = ?, MCPFifth = ?,
+                PIPFirst = ?, PIPThird = ?, PIPFifth = ?,
+                MIPThird = ?, MIPFifth = ?,
+                DIPFirst = ?, DIPThird = ?, DIPFifth = ?,
+                Radius = ?, Ulna = ?, Total = ?, BoneAge = ?,
+                UpdateTime = ?
+            WHERE TCRResultID = ?""";
+
+        return jdbcTemplate.update(sql,
+                result.getMcpFirst(),
+                result.getMcpThird(),
+                result.getMcpFifth(),
+                result.getPipFirst(),
+                result.getPipThird(),
+                result.getPipFifth(),
+                result.getMipThird(),
+                result.getMipFifth(),
+                result.getDipFirst(),
+                result.getDipThird(),
+                result.getDipFifth(),
+                result.getRadius(),
+                result.getUlna(),
+                result.getTotal(),
+                result.getBoneAge(),
+                Timestamp.valueOf(LocalDateTime.now()),
+                result.getTcrResultId());
     }
 }
