@@ -16,8 +16,8 @@ public class AsyncConfig implements AsyncConfigurer {
     @Override
     public Executor getAsyncExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(50);
-        executor.setMaxPoolSize(100);
+        executor.setCorePoolSize(10);
+        executor.setMaxPoolSize(20);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("Request-");
         executor.initialize();
@@ -27,6 +27,29 @@ public class AsyncConfig implements AsyncConfigurer {
     // DICOM操作线程池
     @Bean(name = "dicomTaskExecutor")
     public ScheduledExecutorService dicomTaskExecutor() {
-        return Executors.newScheduledThreadPool(10);
+        return Executors.newScheduledThreadPool(20);
+    }
+
+    // 图像处理线程池
+    @Bean(name = "imageProcessingExecutor")
+    public Executor imageProcessingExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(32); // 核心线程数
+        executor.setMaxPoolSize(64); // 最大线程数
+        executor.setQueueCapacity(200); // 队列容量
+        executor.setThreadNamePrefix("ImageProcessor-");
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "controllerTaskExecutor")
+    public Executor controllerTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(20);  // 核心线程数
+        executor.setMaxPoolSize(50);   // 最大线程数
+        executor.setQueueCapacity(200); // 队列容量
+        executor.setThreadNamePrefix("Controller-Async-");
+        executor.initialize();
+        return executor;
     }
 }

@@ -2,6 +2,7 @@ package com.example.server.repository;
 
 import com.example.server.model.DetectionInfo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -77,5 +78,31 @@ public class DetectionInfoRepository {
         }, keyHolder);
 
         return keyHolder.getKey().longValue();
+    }
+
+    public DetectionInfo findById(Long detectionId) {
+        String sql = "SELECT * FROM DetectionInfo WHERE DetectionID = ?";
+        try {
+            return jdbcTemplate.queryForObject(sql, new Object[]{detectionId}, (rs, rowNum) -> {
+                DetectionInfo info = new DetectionInfo();
+                info.setDetectionId(rs.getLong("DetectionID"));
+                info.setMCPFirst(rs.getString("MCPFirst"));
+                info.setMCPThird(rs.getString("MCPThird"));
+                info.setMCPFifth(rs.getString("MCPFifth"));
+                info.setPIPFirst(rs.getString("PIPFirst"));
+                info.setPIPThird(rs.getString("PIPThird"));
+                info.setPIPFifth(rs.getString("PIPFifth"));
+                info.setMIPThird(rs.getString("MIPThird"));
+                info.setMIPFifth(rs.getString("MIPFifth"));
+                info.setDIPFirst(rs.getString("DIPFirst"));
+                info.setDIPThird(rs.getString("DIPThird"));
+                info.setDIPFifth(rs.getString("DIPFifth"));
+                info.setRadius(rs.getString("Radius"));
+                info.setUlna(rs.getString("Ulna"));
+                return info;
+            });
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
     }
 }

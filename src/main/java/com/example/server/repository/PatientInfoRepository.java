@@ -2,6 +2,7 @@ package com.example.server.repository;
 
 import com.example.server.model.PatientInfo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -12,6 +13,8 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Repository
@@ -154,5 +157,114 @@ public class PatientInfoRepository {
 
             return info;
         });
+    }
+
+    public List<PatientInfo> findByPatientID(String patientID) {
+        String sql = "SELECT * FROM patient_info WHERE PatientID = ?";
+        return jdbcTemplate.query(sql, new Object[]{patientID}, (rs, rowNum) -> {
+            PatientInfo info = new PatientInfo();
+            // 安全处理 PID (Long)
+            Object pidObj = rs.getObject("PID");
+            if (pidObj instanceof Number) {
+                info.setPID(((Number) pidObj).longValue());
+            }
+            info.setPatientID(rs.getString("PatientID"));
+
+            // 安全解析 BrithDate
+            String birthDateStr = rs.getString("BrithDate");
+            if (birthDateStr != null && !birthDateStr.isEmpty()) {
+                try {
+                    info.setBrithDate(LocalDate.parse(birthDateStr));
+                } catch (Exception e) {
+                    System.err.println("解析 BrithDate 失败: " + birthDateStr);
+                }
+            }
+
+            info.setSex(rs.getString("Sex"));
+            info.setStudyInstanceUID(rs.getString("StudyInstanceUID"));
+            info.setSeriesInstanceUID(rs.getString("SeriesInstanceUID"));
+            info.setSOPInstanceUID(rs.getString("SOPInstanceUID"));
+
+            // 安全处理 InferenceID (Long)
+            Object inferenceIdObj = rs.getObject("InferenceID");
+            if (inferenceIdObj instanceof Number) {
+                info.setInferenceID(((Number) inferenceIdObj).longValue());
+            }
+
+            // 安全解析 StudyDate
+            String studyDateStr = rs.getString("StudyDate");
+            if (studyDateStr != null && !studyDateStr.isEmpty()) {
+                try {
+                    info.setStudyDate(LocalDate.parse(studyDateStr));
+                } catch (Exception e) {
+                    System.err.println("解析 StudyDate 失败: " + studyDateStr);
+                }
+            }
+
+            // 创建格式化器
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+            // 添加 createTime 字段处理
+            String createTimeStr = rs.getString("CreateTime");
+            if (createTimeStr != null && !createTimeStr.isEmpty()) {
+                try {
+                    info.setCreateTime(LocalDateTime.parse(createTimeStr, formatter));
+                } catch (Exception e) {
+                    System.err.println("解析 CreateTime 失败: " + createTimeStr);
+                }
+            }
+
+            return info;
+        });
+    }
+
+    public PatientInfo findBySOPInstanceUID(String sopInstanceUID) {
+        String sql = "SELECT * FROM patient_info WHERE SOPInstanceUID = ?";
+        try {
+            return jdbcTemplate.queryForObject(sql, new Object[]{sopInstanceUID}, (rs, rowNum) -> {
+                PatientInfo info = new PatientInfo();
+                // 安全处理 PID
+                Object pidObj = rs.getObject("PID");
+                if (pidObj instanceof Number) {
+                    info.setPID(((Number) pidObj).longValue());
+                }
+                info.setPatientID(rs.getString("PatientID"));
+
+                // 解析 BrithDate
+                String birthDateStr = rs.getString("BrithDate");
+                if (birthDateStr != null && !birthDateStr.isEmpty()) {
+                    try {
+                        info.setBrithDate(LocalDate.parse(birthDateStr));
+                    } catch (Exception e) {
+                        System.err.println("解析 BrithDate 失败: " + birthDateStr);
+                    }
+                }
+
+                info.setSex(rs.getString("Sex"));
+                info.setStudyInstanceUID(rs.getString("StudyInstanceUID"));
+                info.setSeriesInstanceUID(rs.getString("SeriesInstanceUID"));
+                info.setSOPInstanceUID(rs.getString("SOPInstanceUID"));
+
+                // 处理 InferenceID
+                Object inferenceIdObj = rs.getObject("InferenceID");
+                if (inferenceIdObj instanceof Number) {
+                    info.setInferenceID(((Number) inferenceIdObj).longValue());
+                }
+
+                // 解析 StudyDate
+                String studyDateStr = rs.getString("StudyDate");
+                if (studyDateStr != null && !studyDateStr.isEmpty()) {
+                    try {
+                        info.setStudyDate(LocalDate.parse(studyDateStr));
+                    } catch (Exception e) {
+                        System.err.println("解析 StudyDate 失败: " + studyDateStr);
+                    }
+                }
+
+                return info;
+            });
+        } catch (EmptyResultDataAccessException e) {
+            return null; // 无匹配记录
+        }
     }
 }

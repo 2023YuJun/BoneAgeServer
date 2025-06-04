@@ -17,4 +17,6 @@ public class PatientInfo {
     private LocalDate StudyDate;
     private LocalDateTime CreateTime;
 
+    // 临时字段，用于 API 响应，不存储到数据库
+    private transient String downLoadUrl;
 }

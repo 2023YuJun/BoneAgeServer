@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 
 @Data
 public class Tw3CRusResult {
-    private Integer tcrResultId;
+    private Long tcrResultId;
     private Integer mcpFirst;
     private Integer mcpThird;
     private Integer mcpFifth;

@@ -4,7 +4,7 @@ import lombok.Data;
 
 @Data
 public class Tw3CCarpalResult {
-    private  Integer tccResultId;
+    private  Long tccResultId;
     private Integer total;
     private Double boneAge;
 }
