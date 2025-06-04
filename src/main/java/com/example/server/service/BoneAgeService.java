@@ -33,7 +33,7 @@ public class BoneAgeService {
         RusChnResult result = new RusChnResult();
         populateRusChnResultFields(result, partIndices);
         result.setTotal(total);
-        result.setBoneAge(boneAge);
+        result.setBoneAge(Math.round(boneAge * 100.0) / 100.0);
         result.setUpdateTime(LocalDateTime.now());
 
         // 存储记录
@@ -52,7 +52,7 @@ public class BoneAgeService {
         Tw3CRusResult result = new Tw3CRusResult();
         populateTw3CRusResultFields(result, partIndices, isMale);
         result.setTotal(total);
-        result.setBoneAge(boneAge);
+        result.setBoneAge(Math.round(boneAge * 100.0) / 100.0);
         result.setUpdateTime(LocalDateTime.now());
 
         // 存储记录
