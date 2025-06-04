@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -106,59 +107,61 @@ public class DICOMService {
     }
 
     private List<Attributes> queryWithRetry(Attributes keys) {
-        final int maxRetries = 3;
+        final int maxRetries = 1;   //重连最大次数
         int retryDelay = 1;
         List<Attributes> results = new ArrayList<>();
         Exception lastException = null;
 
         for (int attempt = 0; attempt < maxRetries; attempt++) {
             Association association = null;
-
             try {
                 association = createAssociation();
 
-                Object lock = new Object();
+                // 使用 CountDownLatch 替代 wait/notify
+                CountDownLatch latch = new CountDownLatch(1);
                 AtomicBoolean completed = new AtomicBoolean(false);
 
                 association.cfind(
-                    UID.PatientRootQueryRetrieveInformationModelFind,
-                    1,
-                    keys,
-                    null,
-                    new DimseRSPHandler(0) {
-                        @Override
-                        public void onDimseRSP(Association as, Attributes cmd, Attributes data) {
-                            int status = cmd.getInt(Tag.Status, -1);
-                            if (status == Status.Pending && data != null) { // ff00H
-                                System.out.println("Received Dataset: " + data);
-                                results.add(data);
-                            } else if (status == Status.Success) {
-                                synchronized (lock) {
+                        UID.PatientRootQueryRetrieveInformationModelFind,
+                        1,
+                        keys,
+                        null,
+                        new DimseRSPHandler(0) {
+                            @Override
+                            public void onDimseRSP(Association as, Attributes cmd, Attributes data) {
+                                int status = cmd.getInt(Tag.Status, -1);
+                                if (status == Status.Pending && data != null) {
+                                    results.add(data);
+                                } else if (status == Status.Success) {
                                     completed.set(true);
-                                    lock.notifyAll();
+                                    latch.countDown();
+                                } else if (status != Status.Pending) {
+                                    latch.countDown();
                                 }
                             }
                         }
-                    }
                 );
-                synchronized (lock) {
-                    while (!completed.get()) {
-                        try {
-                            lock.wait(30000); // 最多等待60秒
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    }
+
+                // 设置更合理的等待时间 (30秒)
+                if (!latch.await(30, TimeUnit.SECONDS)) {
+                    System.err.println("查询超时，准备重试...");
+                    throw new TimeoutException("DICOM查询超时");
                 }
-                return results;
+
+                if (completed.get()) {
+                    return results;
+                }
             } catch (Exception e) {
                 lastException = e;
                 System.err.printf("查询失败 (尝试 %d/%d): [%s] %s%n",
                         attempt + 1, maxRetries, e.getClass().getSimpleName(), e.getMessage());
-                // 打印堆栈跟踪（调试阶段启用）
-                e.printStackTrace();
-                try { Thread.sleep(retryDelay * 200L); } catch (InterruptedException ignored) {}
+
+                // 指数退避重试
+                try {
+                    Thread.sleep(retryDelay * 1000L);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
                 retryDelay *= 2;
             } finally {
                 if (association != null) {
@@ -168,12 +171,16 @@ public class DICOMService {
                             association.getDevice().unbindConnections();
                         }
                     } catch (IOException ex) {
-                        ex.printStackTrace();
+                        System.err.println("释放DICOM连接失败: " + ex.getMessage());
                     }
                 }
             }
         }
-        throw new RuntimeException("所有重试均失败: " + (lastException != null ? lastException.getMessage() : "未知错误"), lastException);
+
+        // 重试全部失败时返回空列表，而不是抛出异常
+        System.err.println("所有重试均失败: " +
+                (lastException != null ? lastException.getMessage() : "未知错误"));
+        return Collections.emptyList();
     }
 
     public String downloadAndConvertToPng(String downloadUrl, String sopUID) {

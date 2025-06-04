@@ -12,6 +12,7 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.util.*;
@@ -102,6 +103,7 @@ public class DetectionService {
 
             // 验证结果数量
             if (detections.size() != 21) {
+                saveImageWithDetections(originImage, detections);
                 return Collections.singletonMap("error",
                         "检测到 "+detections.size()+" 个结果，预期应为21个");
             }
@@ -393,6 +395,51 @@ public class DetectionService {
         } catch (Exception e) {
             System.err.println("数据库保存失败: " + e.getMessage());
             return null;
+        }
+    }
+
+    // 绘制检测框到图像副本并保存
+    private void saveImageWithDetections(BufferedImage originImage, List<DetectionResult> detections) {
+        // 创建图像副本
+        BufferedImage imageCopy = new BufferedImage(
+                originImage.getWidth(),
+                originImage.getHeight(),
+                BufferedImage.TYPE_INT_RGB
+        );
+        Graphics2D g2d = imageCopy.createGraphics();
+        g2d.drawImage(originImage, 0, 0, null);
+
+        // 绘制检测框
+        g2d.setColor(Color.RED);
+        g2d.setStroke(new BasicStroke(2));
+
+        for (DetectionResult det : detections) {
+            float[] bbox = det.bbox;
+            g2d.drawRect(
+                    (int) Math.round(bbox[0]),
+                    (int) Math.round(bbox[1]),
+                    (int) Math.round(bbox[2] - bbox[0]),
+                    (int) Math.round(bbox[3] - bbox[1])
+            );
+            g2d.drawString(det.className, (int) Math.round(bbox[0]), (int) Math.round(bbox[1] - 5));
+        }
+
+        g2d.dispose();
+
+        // 保存图像到项目根目录
+        File outputDir = new File("detection_errors");
+        if (!outputDir.exists()) {
+            outputDir.mkdirs();
+        }
+
+        String filename = String.format("error_%s.png", new Date().getTime());
+        File outputFile = new File(outputDir, filename);
+
+        try {
+            ImageIO.write(imageCopy, "PNG", outputFile);
+            System.out.println("检测框异常图像已保存到: " + outputFile.getAbsolutePath());
+        } catch (IOException e) {
+            System.err.println("保存图像失败: " + e.getMessage());
         }
     }
 

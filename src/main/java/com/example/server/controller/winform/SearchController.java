@@ -58,7 +58,7 @@ public class SearchController {
         try {
             List<Attributes> patients = dicomService.patientSearch(patientID);
             if (patients.isEmpty()) {
-                return completedErrorResponse(HttpStatus.NOT_FOUND, "未找到患者ID: " + patientID);
+                return handleDatabaseFallback(patientID);
             }
 
             // 获取患者元数据
@@ -86,8 +86,62 @@ public class SearchController {
             return CompletableFuture.completedFuture(ResponseEntity.ok(responseMap));
 
         } catch (Exception e) {
-            return CompletableFuture.completedFuture(handleException(e));
+            // 统一错误处理，不返回堆栈跟踪
+            return CompletableFuture.completedFuture(
+                    ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                            .body(Map.of(
+                                    "error", "服务暂时不可用",
+                                    "message", "请稍后重试或联系管理员"
+                            ))
+            );
         }
+    }
+
+    /**
+     * 处理PACS查询失败时的数据库回退逻辑
+     */
+    private CompletableFuture<ResponseEntity<?>> handleDatabaseFallback(String patientID) {
+        // 1. 从数据库查询患者记录
+        List<PatientInfo> dbPatients = patientInfoRepository.findByPatientID(patientID);
+
+        // 2. 数据库中也找不到记录
+        if (dbPatients.isEmpty()) {
+            System.out.println("患者ID: " + patientID + " (PACS和数据库均无记录)");
+            return completedErrorResponse(HttpStatus.NOT_FOUND,
+                    "未找到患者ID: " + patientID);
+        }
+
+        // 3. 数据库中找到记录，处理未完成的任务
+        List<PatientInfo> unprocessedRecords = patientInfoRepository.findUnprocessedRecords(patientID);
+        List<String> pngPaths = new ArrayList<>();
+
+        // 获取性别信息（使用第一个有效记录）
+        String sex = "U";
+        for (PatientInfo p : dbPatients) {
+            if (p.getSex() != null && !p.getSex().isEmpty()) {
+                sex = p.getSex();
+                break;
+            }
+        }
+        boolean isMale = sex.equalsIgnoreCase("M");
+
+        for (PatientInfo record : unprocessedRecords) {
+            String pngPath = processUnprocessedRecord(record);
+            if (pngPath != null) {
+                pngPaths.add(pngPath);
+            }
+        }
+
+        // 异步处理图像
+        asyncProcessImages(pngPaths, isMale);
+
+        // 4. 返回成功响应（即使没有未处理记录也返回成功）
+        System.out.println("患者信息从数据库加载成功" +
+                (pngPaths.isEmpty() ? "" : "，处理了 " + pngPaths.size() + " 个未完成记录"));
+        Map<String, String> responseMap = new HashMap<>();
+        responseMap.put(MESSAGE_KEY, "推理成功");
+        responseMap.put(URL_KEY, frontendUrl + patientID);
+        return CompletableFuture.completedFuture(ResponseEntity.ok(responseMap));
     }
 
     /**
@@ -112,7 +166,6 @@ public class SearchController {
                 pngPaths.add(pngPath);
             }
         }
-
 
         // 获取数据库中该患者最新的Study日期
         LocalDate latestStudyDateInDB = patientInfoRepository.findLatestStudyDateByPatient(patientID);
@@ -277,13 +330,4 @@ public class SearchController {
         );
     }
 
-    /**
-     * 统一异常处理
-     */
-    private ResponseEntity<?> handleException(Exception ex) {
-        Throwable rootCause = ex.getCause() != null ? ex.getCause() : ex;
-        String errorMsg = "服务器错误: " + rootCause.getMessage();
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Map.of(ERROR_KEY, errorMsg));
-    }
 }

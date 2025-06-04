@@ -34,10 +34,21 @@ public class AsyncConfig implements AsyncConfigurer {
     @Bean(name = "imageProcessingExecutor")
     public Executor imageProcessingExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(16); // 核心线程数
-        executor.setMaxPoolSize(32); // 最大线程数
-        executor.setQueueCapacity(100); // 队列容量
+        executor.setCorePoolSize(32); // 核心线程数
+        executor.setMaxPoolSize(64); // 最大线程数
+        executor.setQueueCapacity(200); // 队列容量
         executor.setThreadNamePrefix("ImageProcessor-");
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "controllerTaskExecutor")
+    public Executor controllerTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(20);  // 核心线程数
+        executor.setMaxPoolSize(50);   // 最大线程数
+        executor.setQueueCapacity(200); // 队列容量
+        executor.setThreadNamePrefix("Controller-Async-");
         executor.initialize();
         return executor;
     }
