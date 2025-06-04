@@ -14,6 +14,9 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 
 @Repository
@@ -58,8 +61,8 @@ public class RusChnResultRepository {
                 MIPThird, MIPFifth,
                 DIPFirst, DIPThird, DIPFifth,
                 Radius, Ulna, Total, BoneAge,
-                UpdateTime
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""";
+                CreateTime, UpdateTime
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""";
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
 
@@ -86,7 +89,11 @@ public class RusChnResultRepository {
             ps.setObject(index++, result.getUlna());
             ps.setObject(index++, result.getTotal());
             ps.setObject(index++, result.getBoneAge());
-            ps.setString(index, new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
+            // 设置 CreateTime 和 UpdateTime 为 UTC 时间
+            ZonedDateTime nowUtc = ZonedDateTime.now(ZoneId.of("UTC"));
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            ps.setString(index++, nowUtc.format(formatter));
+            ps.setString(index, nowUtc.format(formatter));
 
             return ps;
         }, keyHolder);
@@ -116,15 +123,27 @@ public class RusChnResultRepository {
                 result.setTotal(rs.getInt("Total"));
                 result.setBoneAge(rs.getDouble("BoneAge"));
 
-                // 添加时间字段处理
-                Object createTime = rs.getObject("CreateTime");
-                if (createTime != null) {
-                    result.setCreateTime(LocalDateTime.parse(createTime.toString().replace(" ", "T")));
+                // 创建格式化器
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+                // 处理 CreateTime
+                String createTimeStr = rs.getString("CreateTime");
+                if (createTimeStr != null && !createTimeStr.isEmpty()) {
+                    try {
+                        result.setCreateTime(LocalDateTime.parse(createTimeStr, formatter));
+                    } catch (Exception e) {
+                        System.err.println("解析 CreateTime 失败: " + createTimeStr);
+                    }
                 }
 
-                Object updateTime = rs.getObject("UpdateTime");
-                if (updateTime != null) {
-                    result.setUpdateTime(LocalDateTime.parse(updateTime.toString().replace(" ", "T")));
+                // 处理 UpdateTime
+                String updateTimeStr = rs.getString("UpdateTime");
+                if (updateTimeStr != null && !updateTimeStr.isEmpty()) {
+                    try {
+                        result.setUpdateTime(LocalDateTime.parse(updateTimeStr, formatter));
+                    } catch (Exception e) {
+                        System.err.println("解析 UpdateTime 失败: " + updateTimeStr);
+                    }
                 }
 
                 return result;
@@ -145,6 +164,10 @@ public class RusChnResultRepository {
                 UpdateTime = ?
             WHERE RCResultID = ?""";
 
+        ZonedDateTime nowUtc = ZonedDateTime.now(ZoneId.of("UTC"));
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        String updateTime = nowUtc.format(formatter);
+
         return jdbcTemplate.update(sql,
                 result.getMcpFirst(),
                 result.getMcpThird(),
@@ -161,7 +184,7 @@ public class RusChnResultRepository {
                 result.getUlna(),
                 result.getTotal(),
                 result.getBoneAge(),
-                Timestamp.valueOf(LocalDateTime.now()),
+                updateTime,
                 result.getRcResultId());
     }
 }

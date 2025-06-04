@@ -14,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @Repository
@@ -200,13 +201,16 @@ public class PatientInfoRepository {
                 }
             }
 
+            // 创建格式化器
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
             // 添加 createTime 字段处理
-            Object createTimeObj = rs.getObject("CreateTime");
-            if (createTimeObj != null) {
+            String createTimeStr = rs.getString("CreateTime");
+            if (createTimeStr != null && !createTimeStr.isEmpty()) {
                 try {
-                    info.setCreateTime(LocalDateTime.parse(createTimeObj.toString()));
+                    info.setCreateTime(LocalDateTime.parse(createTimeStr, formatter));
                 } catch (Exception e) {
-                    System.err.println("解析 CreateTime 失败: " + createTimeObj);
+                    System.err.println("解析 CreateTime 失败: " + createTimeStr);
                 }
             }
 
